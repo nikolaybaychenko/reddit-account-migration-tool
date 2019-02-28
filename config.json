@@ -1,0 +1,6 @@
+{
+	"auth_params": {
+		"redirect_uri": "https://gitlab.com/nikolaychenko/reddit-account-migration-tool/wikis/authorization-success",
+		"client_id": "4TBI_FES-hrsFQ"
+	}
+}
