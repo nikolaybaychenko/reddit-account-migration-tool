@@ -5,6 +5,7 @@ import random
 import string
 import urllib.parse
 import datetime
+import os
 import os.path
 import time
 
@@ -14,7 +15,8 @@ INPUT_URL_TYPE_EXPORT = 'EXPORT DATA FROM'
 INPUT_URL_TYPE_IMPORT = 'IMPORT DATA TO'
 SCOPE_MYSUBREDDITS = 'mysubreddits'
 SCOPE_SUBSCRIBE = 'subscribe'
-REQUEST_DELAY_SECONDS = 4
+REQUEST_DELAY_SECONDS = 3
+GET_SUB_LIMIT = 1000
 
 def auth_user(user, input_url_type, config_arr, permission_scope):
     print_auth_user_url(config_arr, permission_scope)
@@ -23,7 +25,8 @@ def auth_user(user, input_url_type, config_arr, permission_scope):
     )
     acceess_token_response_user = get_access_token(
         auth_params_user['code'],
-        config_arr['auth_params']
+        config_arr['auth_params'],
+        user
     )
     if acceess_token_response_user == None:
         return None
@@ -34,7 +37,7 @@ def print_auth_user_url(config_arr, permission_scope):
     auth_params.update({
         'response_type': 'code',
         'state': random_word(12),
-        'duration': 'permanent',
+        'duration': 'temporary',
         'scope': permission_scope
     })
     auth_params_string = ''
@@ -64,7 +67,8 @@ def parse_auth_user_url(result_url):
     urllib.parse.parse_qs(urllib.parse.urlsplit(result_url).query)
     return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(result_url).query))
 
-def get_access_token(code, auth_params):
+def get_access_token(code, auth_params, user):
+    print('Requesting access token for ' + user)
     time.sleep(REQUEST_DELAY_SECONDS)
     client_auth = requests.auth.HTTPBasicAuth(auth_params['client_id'], None)
     response = requests.post('https://www.reddit.com/api/v1/access_token',
@@ -86,22 +90,30 @@ def get_access_token(code, auth_params):
         return response_body
 
 def store_user_access_data(data):
+    print('Storing access data in user_access_data.json')
     with open('user_access_data.json', 'w') as outfile:
         json.dump(data, outfile)
 
 def read_user_acess_data():
+    print('Reading user access data from user_access_data.json')
     if os.path.isfile('user_access_data.json') == True:
         with open('user_access_data.json', 'r') as json_file:
             data = json.load(json_file)
         return data
     return None
 
-#TODO check why this doesn't get all subs for some reason
 def get_srs(access_token):
+    print('Requesting subscribed subreddits')
     time.sleep(REQUEST_DELAY_SECONDS)
     response = requests.get(
         'https://oauth.reddit.com/subreddits/mine/subscriber',
-        headers = {'Authorization': 'Bearer ' + access_token}
+        headers = {
+            'Authorization': 'Bearer ' + access_token,
+            'User-agent': 'reddit-account-migration-tool_0.0.1'
+        },
+        params = {
+            'limit': GET_SUB_LIMIT
+        }
     )
     if response.status_code == 200:
         srs_json = json.loads(response.text)
@@ -109,25 +121,34 @@ def get_srs(access_token):
         for sr in srs_json['data']['children']:
             srs.append(sr['data']['name'])
         return srs
+    elif response.status_code == 401:
+        os.remove('user_access_data.json')
+        print('You user access data seems to be invalidated.'
+        + ' Try to run this script again.')
     else:
         print('Something unexpected happened, sorry :( '
         + '\nresponse: ' + response.text)
         return None
 
 def sub_srs(access_token, srs):
+    print('Subscribing to subreddits')
     time.sleep(REQUEST_DELAY_SECONDS)
     srs = ','.join(srs)
     return requests.post(
         'https://oauth.reddit.com/api/subscribe',
-        params = {'Authorization': 'Bearer ' + access_token},
         headers = {
+            'Authorization': 'Bearer ' + access_token,
+            'User-agent': 'reddit-account-migration-tool_0.0.1'
+        },
+        params = {
             'action': 'sub',
-            'skip_initial_defaults': 1,
+            'skip_initial_defaults': '1',
             'sr': srs
         }
     )
 
 def read_config():
+    print('Reading app config from config.json')
     with open('config.json', 'r') as json_file:
         data = json.load(json_file)
     return data
@@ -158,9 +179,12 @@ def main():
     srs = get_srs(user_access_data[USER_1]['access_token'])
     if srs == None:
         return 1
-    print(srs)
     sub_srs_reponse = sub_srs(user_access_data[USER_2]['access_token'], srs)
-    print (sub_srs_reponse)
+    if (sub_srs_reponse.status_code):
+        print('Great success! Check subs on your second account.')
+    else:
+        print ('Something wrong happened, here is the response from Reddit API: '
+        + sub_srs_reponse)
 
     return 1
 
